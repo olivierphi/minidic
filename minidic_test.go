@@ -7,7 +7,7 @@ import (
 func TestWithString(t *testing.T) {
 	c := NewContainer()
 
-	c.add("param", "value")
+	c.add(NewInjection("param", "value"))
 
 	injectedValue, _ := c.get("param")
 	if injectedValue != "value" {
@@ -19,7 +19,7 @@ func TestWithFunction(t *testing.T) {
 	c := NewContainer()
 
 	f := func(c *container) Service { return Service{} }
-	c.add("service", f)
+	c.add(NewInjection("service", f))
 
 	injectedValue, _ := c.get("service")
 	_, ok := injectedValue.(Service)
@@ -33,7 +33,7 @@ func TestServicesShouldBeTheSameInstance(t *testing.T) {
 
 	i := 0
 	f := func(c *container) Service { i++; return Service{i} }
-	c.add("service", f)
+	c.add(NewInjection("service", f))
 
 	injectedValue1, _ := c.get("service")
 	injectedValue2, _ := c.get("service")
@@ -47,7 +47,7 @@ func TestServicesReceiveAPointerToTheContainer(t *testing.T) {
 
 	var receivedContainer *container
 	f := func(c *container) int { receivedContainer = c; return 33 }
-	c.add("service", f)
+	c.add(NewInjection("service", f))
 
 	injectedValue, _ := c.get("service")
 	if injectedValue != 33 {
@@ -61,10 +61,10 @@ func TestServicesReceiveAPointerToTheContainer(t *testing.T) {
 func TestHasInjection(t *testing.T) {
 	c := NewContainer()
 
-	c.add("param", "value")
-	c.add("nil", nil)
+	c.add(NewInjection("param", "value"))
+	c.add(NewInjection("nil", nil))
 	f := func(c *container) Service { return Service{} }
-	c.add("service", f)
+	c.add(NewInjection("service", f))
 
 	if !c.has("param") {
 		t.Error("Expected container to contain \"param\"")
@@ -83,19 +83,19 @@ func TestHasInjection(t *testing.T) {
 func TestErrorIfGettingNonExistentInjectionId(t *testing.T) {
 	c := NewContainer()
 
-	_, error := c.get("foo")
-	if nil == error {
+	_, e := c.get("foo")
+	if nil == e {
 		t.Error("Expected container to return an error for a non-existent injection id")
 	}
-	if _, ok := error.(UnknownInjectionIdError); !ok {
-		t.Error("Expected container to return an UnknownInjectionIdError for a non-existent injection id, got ", error)
+	if _, ok := e.(UnknownInjectionIdError); !ok {
+		t.Error("Expected container to return an UnknownInjectionIdError for a non-existent injection id, got ", e)
 	}
 }
 
 func TestInjectionDeletion(t *testing.T) {
 	c := NewContainer()
 
-	c.add("param", "value")
+	c.add(NewInjection("param", "value"))
 
 	if !c.has("param") {
 		t.Error("Expected container to contain \"param\"")
@@ -117,6 +117,23 @@ func TestInjectionDeletion(t *testing.T) {
 	e3 := c.del("param")
 	if e3 == nil {
 		t.Error("Expected container to return an error when deleting a previously deleted injection id")
+	}
+}
+
+func TestFactoriesShouldReturnDifferentInstancesForEachRetrieval(t *testing.T) {
+	c := NewContainer()
+
+	i := 0
+	f := func(c *container) Service { i++; return Service{i} }
+
+	injection := NewInjection("service", f)
+	injection.asFactory = true
+	c.add(injection)
+
+	injectedValue1, _ := c.get("service")
+	injectedValue2, _ := c.get("service")
+	if injectedValue1 == injectedValue2 {
+		t.Error("Expected consecutive calls to the same factory service to return new values each time, got ", injectedValue1, injectedValue2)
 	}
 }
 

@@ -8,17 +8,32 @@ import (
 type container struct {
 	values                map[string]interface{}
 	callablesResultsCache map[string]*interface{}
+	factories             map[string]bool
+}
+
+type injection struct {
+	injectionId string
+	value       interface{}
+	asFactory   bool
 }
 
 func NewContainer() *container {
 	c := new(container)
 	c.values = make(map[string]interface{})
 	c.callablesResultsCache = make(map[string]*interface{})
+	c.factories = make(map[string]bool)
 	return c
 }
 
-func (r *container) add(injectionId string, value interface{}) {
-	r.values[injectionId] = value
+func NewInjection(injectionId string, value interface{}) *injection {
+	return &injection{injectionId: injectionId, value: value, asFactory: false}
+}
+
+func (r *container) add(injection *injection) {
+	r.values[injection.injectionId] = injection.value
+	if injection.asFactory {
+		r.factories[injection.injectionId] = true
+	}
 }
 
 func (r *container) get(injectionId string) (interface{}, error) {
@@ -31,13 +46,14 @@ func (r *container) get(injectionId string) (interface{}, error) {
 		return nil, UnknownInjectionIdError{id: injectionId}
 	}
 
-	isFunction := reflect.TypeOf(value).Kind() == reflect.Func
-	if isFunction {
+	if isFunction(value) {
 		functionArg := []reflect.Value{reflect.ValueOf(r)}
 		value = reflect.ValueOf(value).Call(functionArg)[0].Interface()
 	}
 
-	r.callablesResultsCache[injectionId] = &value
+	if !r.factories[injectionId] {
+		r.callablesResultsCache[injectionId] = &value
+	}
 
 	return value, nil
 }
@@ -64,4 +80,8 @@ type UnknownInjectionIdError struct {
 
 func (e UnknownInjectionIdError) Error() string {
 	return fmt.Sprintf("Unknown injection id '%s'", e.id)
+}
+
+func isFunction(value interface{}) bool {
+	return reflect.TypeOf(value).Kind() == reflect.Func
 }
