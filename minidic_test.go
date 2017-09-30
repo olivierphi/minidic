@@ -190,23 +190,16 @@ func TestServicesDependencies(t *testing.T) {
 	c := dic.NewContainer()
 
 	f := func(c dic.Container) string {
-		recipient := c.Get("recipient")
-		if recipientStr, ok := recipient.(string); ok {
-			return service{}.sayHi(recipientStr)
-		}
-		panic(dic.UnknownInjectionIdError{InjectionId: "recipient"})
+		recipient := c.Get("recipient").(string)
+		return service{}.sayHi(recipient)
 	}
 
 	c.Add(dic.NewInjection("recipient", "world"))
 	c.Add(dic.NewInjection("helloService", f))
 
-	hello := c.Get("helloService")
-	if helloStr, ok := hello.(string); ok {
-		if helloStr != "hello world" {
-			t.Error("Expected 'helloService' result to be a 'hello world', got ", helloStr)
-		}
-	} else {
-		t.Error("Expected 'helloService' result to be a string, got ", hello)
+	hello := c.Get("helloService").(string)
+	if hello != "hello world" {
+		t.Error("Expected 'helloService' result to be a 'hello world', got ", hello)
 	}
 }
 
