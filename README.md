@@ -6,7 +6,7 @@ Minidic is a small Dependency Injection Container for the Go language, ported fr
 of just one file and two public interfaces (about 200 lines of code).
 
 The test suite, and even this README file, are basically a copy-n-paste of Pimple's ones,
-with only a light adaptation to Go.
+with only a light adaptation to Go and the addition of a way define services to with pre-resolved dependencies.
 
 So all kudos go to [Fabien Potencier](http://fabien.potencier.org/) and to Pimple contributors!
 
@@ -14,19 +14,19 @@ So all kudos go to [Fabien Potencier](http://fabien.potencier.org/) and to Pimpl
 Install it:
 
 ```bash
-    $ go get -u github.com/DrBenton/minidic
+$ go get -u github.com/DrBenton/minidic
 ```
 
 Then import it in your code, and you're good to go:
 
 ```go
-    import dic "github.com/DrBenton/minidic"
+import dic "github.com/DrBenton/minidic"
 ```
 
 Creating a container is a matter of instating the a `Container` interface:
 
 ```go
-    container := dic.NewContainer()
+container := dic.NewContainer()
 ```
 
 As many other dependency injection containers, Minidic is able to manage two
@@ -40,9 +40,9 @@ different kind of data: *services* and *parameters*.
 Defining a parameter is as simple as using the Container `Add(newInjection Injection)` method:
 
 ```go
-    // define some parameters
-    container.Add(dic.NewInjection("cookie_name", "SESSION_ID"))
-    container.Add(dic.NewInjection("cookie_ttl", 3600))
+// define some parameters
+container.Add(dic.NewInjection("cookie_name", "SESSION_ID"))
+container.Add(dic.NewInjection("cookie_ttl", 3600))
 ```
 
 ### Defining Services
@@ -54,17 +54,17 @@ any object could be a service.
 Services are defined by functions that return an instance of an object:
 
 ```go
-    // define some services
-    func getSessionStorageConfig(c dic.Container) SessionStorageConfig {
-        cookieName := c.Get("cookie_name").(string)
-        cookieTTL := c.Get("cookie_ttl").(int)
-        return SessionStorageConfig{cookieName, cookieTTL}
-    }
-    c.Add(dic.NewInjection("session_storage_config", getSessionStorageConfig))
+// define some services
+func getSessionStorageConfig(c dic.Container) SessionStorageConfig {
+    cookieName := c.Get("cookie_name").(string)
+    cookieTTL := c.Get("cookie_ttl").(int)
+    return SessionStorageConfig{cookieName, cookieTTL}
+}
+container.Add(dic.NewInjection("session_storage_config", getSessionStorageConfig))
 
-    c.Add(dic.NewInjection("session_storage", func getSessionStorageConfig(c dic.Container) SessionStorage {
-        return NewSessionStorage(c.Get("session_storage_config").(SessionStorageConfig))
-    })
+container.Add(dic.NewInjection("session_storage", func getSessionStorageConfig(c dic.Container) SessionStorage {
+    return NewSessionStorage(c.Get("session_storage_config").(SessionStorageConfig))
+})
 ```
 
 Notice that the function has access to the current container
@@ -76,13 +76,43 @@ does not matter, and there is no noticeable performance penalty.
 Using the defined services is also very easy:
 
 ```go
-    // get the session storage object
-    session := container.Get("session_storage").(SessionStorage)
+// get the session storage object
+session := container.Get("session_storage").(SessionStorage)
 
-    // the above call is roughly equivalent to the following code:
-    // sessionStorage := SessionStorageConfig{"SESSION_ID", 3600}
-    // session := NewSessionStorage(sessionStorage)
+// the above call is roughly equivalent to the following code:
+// sessionStorage := SessionStorageConfig{"SESSION_ID", 3600}
+// session := NewSessionStorage(sessionStorage)
 ```
+
+#### Services functions with pre-resolved dependencies
+
+You can also set a slice of services ids, with the `WithInjectedDependencies([]string)` method
+of the Injection interface. That way, you don't have to inject the container and
+manually retrieve your service dependencies: they are already resolved when your service function
+is called!
+```go
+container.Add(dic.NewInjection(
+    "mailer.transport",
+    func(smtpServer string, port uint) MailerTransport {
+        return &MailerSmtpTransport{smtpServer, port}
+    },
+).WithInjectedDependencies([]string{"mailer.transport.smtp", "mailer.transport.port"}))
+
+container.Add(dic.NewInjection(
+    "mailer",
+    func(transport *MailerTransport, defaultSender string, debugMode bool) Mailer {
+        return Mailer{transport, defaultSender, debugMode}
+    },
+).WithInjectedDependencies([]string{"mailer.transport", "mailer.default_sender", "app.debug"}))
+
+container.Add(dic.NewInjection("mailer.transport.smtp", "smtp.google.com"))
+container.Add(dic.NewInjection("mailer.transport.port", 10052))
+container.Add(dic.NewInjection("mailer.default_sender", "olivier@rougemine.com"))
+
+// So any service can now have a shared instance of the Mailer:
+mailer := container.Get("mailer").(Mailer)
+```
+
 
 ### Defining Factory Services
 
@@ -90,10 +120,10 @@ By default, each time you get a service, Minidic returns the same instance of it
 If you want a different instance to be returned for all calls, mark the service as being a "factory":
 
 ```go
-    container.Add(dic.NewInjection("incident_context", generateNewIncidentContext).MarkAsFactory())
+container.Add(dic.NewInjection("incident_context", generateNewIncidentContext).MarkAsFactory())
 ```
 
-Now, each call to `container.Get("service")` returns a new instance of the service.
+Now, each call to `container.Get("incident_context")` returns a new instance of the service.
 
 ### Protecting Parameters
 
@@ -102,7 +132,7 @@ mark the service as being a "protected" one to store them as
 parameter:
 
 ```go
-   container.Add(dic.NewInjection("random_genrator", myRandonGeneratorFunction).MarkAsProtected())
+container.Add(dic.NewInjection("random_generator", myRandonGeneratorFunction).MarkAsProtected())
 ```
 
 ### Modifying services after creation
@@ -112,16 +142,16 @@ defined. You can use the `extend()` method to define additional code to
 be run on your service just after it is created:
 
 ```go
-    container.Add(dic.NewInjection("mailer", func (c dic.Container) Mailer {
-        return NewMailJetMailer(c.Get("mailjet.login").(string), c.Get("mailjet.password").(string))
-    })
+container.Add(dic.NewInjection("mailer", func (c dic.Container) Mailer {
+    return NewMailJetMailer(c.Get("mailjet.login").(string), c.Get("mailjet.password").(string))
+})
 
-    if debug {
-        container.Extend("mailer", func(c dic.Container, decoratedMailer Mailer) Mailer {
-            return DebugMailer{decoratedMailer, c.Get("app.logs_dir").(string)}
-        })
-        // in "debug" mode, the "mailer" service is now decorated with a DebugMailer
-    }
+if debug {
+    container.Extend("mailer", func(c dic.Container, decoratedMailer Mailer) Mailer {
+        return DebugMailer{decoratedMailer, c.Get("app.logs_dir").(string)}
+    })
+    // in "debug" mode, the "mailer" service is now decorated with a DebugMailer
+}
 ```
 
 The first argument is the name of the object, the second is a function that
