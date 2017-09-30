@@ -6,70 +6,75 @@ import (
 )
 
 type container struct {
-	values                map[string]interface{}
-	callablesResultsCache map[string]*interface{}
-	factories             map[string]bool
+	injections            map[string]injection
+	functionsResultsCache map[string]*interface{}
 }
 
 type injection struct {
 	injectionId string
 	value       interface{}
 	asFactory   bool
+	protected   bool
 }
 
 func NewContainer() *container {
 	c := new(container)
-	c.values = make(map[string]interface{})
-	c.callablesResultsCache = make(map[string]*interface{})
-	c.factories = make(map[string]bool)
+	c.injections = make(map[string]injection)
+	c.functionsResultsCache = make(map[string]*interface{})
 	return c
 }
 
-func NewInjection(injectionId string, value interface{}) *injection {
-	return &injection{injectionId: injectionId, value: value, asFactory: false}
+func NewInjection(injectionId string, value interface{}) injection {
+	return injection{injectionId: injectionId, value: value, asFactory: false, protected: false}
 }
 
-func (r *container) add(injection *injection) {
-	r.values[injection.injectionId] = injection.value
-	if injection.asFactory {
-		r.factories[injection.injectionId] = true
+func (r *container) add(injection injection) {
+	r.injections[injection.injectionId] = injection
+}
+
+func (r *container) get(injectionId string) interface{} {
+	value, err := r.getWithoutPanic(injectionId)
+	if err != nil {
+		panic(err)
 	}
+	return value
 }
 
-func (r *container) get(injectionId string) (interface{}, error) {
-	if value, ok := r.callablesResultsCache[injectionId]; ok {
+func (r *container) getWithoutPanic(injectionId string) (interface{}, error) {
+	if value, ok := r.functionsResultsCache[injectionId]; ok {
 		return *value, nil
 	}
 
-	value, exists := r.values[injectionId]
+	injection, exists := r.injections[injectionId]
 	if !exists {
 		return nil, UnknownInjectionIdError{id: injectionId}
 	}
 
-	if isFunction(value) {
-		functionArg := []reflect.Value{reflect.ValueOf(r)}
-		value = reflect.ValueOf(value).Call(functionArg)[0].Interface()
+	value := injection.value
+
+	if isFunction(value) && !injection.protected {
+		value = triggerFunctionWithContainer(r, value)
 	}
 
-	if !r.factories[injectionId] {
-		r.callablesResultsCache[injectionId] = &value
+	if !injection.asFactory {
+		r.functionsResultsCache[injectionId] = &value
 	}
 
 	return value, nil
 }
 
 func (r *container) has(injectionId string) bool {
-	_, ok := r.values[injectionId]
+	_, ok := r.injections[injectionId]
 	return ok
 }
 
 func (r *container) del(injectionId string) error {
-	_, ok := r.values[injectionId]
+	_, ok := r.injections[injectionId]
 	if !ok {
 		return UnknownInjectionIdError{id: injectionId}
 	}
 
-	delete(r.values, injectionId)
+	delete(r.injections, injectionId)
 
 	return nil
 }
@@ -84,4 +89,9 @@ func (e UnknownInjectionIdError) Error() string {
 
 func isFunction(value interface{}) bool {
 	return reflect.TypeOf(value).Kind() == reflect.Func
+}
+
+func triggerFunctionWithContainer(c *container, function interface{}) interface{} {
+	functionArg := []reflect.Value{reflect.ValueOf(c)}
+	return reflect.ValueOf(function).Call(functionArg)[0].Interface()
 }
