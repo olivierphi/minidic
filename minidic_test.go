@@ -1,27 +1,28 @@
-package minidic
+package minidic_test
 
 import (
+	dic "github.com/DrBenton/minidic"
 	"testing"
 )
 
 func TestWithString(t *testing.T) {
-	c := NewContainer()
+	c := dic.NewContainer()
 
-	c.add(NewInjection("param", "value"))
+	c.Add(dic.NewInjection("param", "value"))
 
-	injectedValue := c.get("param")
+	injectedValue := c.Get("param")
 	if injectedValue != "value" {
 		t.Error("Expected \"value\", got ", injectedValue)
 	}
 }
 
 func TestWithFunction(t *testing.T) {
-	c := NewContainer()
+	c := dic.NewContainer()
 
-	f := func(c *container) service { return service{} }
-	c.add(NewInjection("service", f))
+	f := func(c dic.Container) service { return service{} }
+	c.Add(dic.NewInjection("service", f))
 
-	injectedValue := c.get("service")
+	injectedValue := c.Get("service")
 	_, ok := injectedValue.(service)
 	if !ok {
 		t.Error("Expected service return value, got ", injectedValue)
@@ -29,12 +30,12 @@ func TestWithFunction(t *testing.T) {
 }
 
 func TestServiceDefinedWithFunctionOnlyArgumentMustBeAContainerOrPanicWillOccur(t *testing.T) {
-	c := NewContainer()
+	c := dic.NewContainer()
 
 	f1 := func() service { return service{} }
-	c.add(NewInjection("service.no_arg", f1))
+	c.Add(dic.NewInjection("service.no_arg", f1))
 	f2 := func(test string) service { return service{} }
-	c.add(NewInjection("service.wrong_arg_type", f2))
+	c.Add(dic.NewInjection("service.wrong_arg_type", f2))
 
 	defer func() {
 		recoveredErr := recover()
@@ -42,10 +43,10 @@ func TestServiceDefinedWithFunctionOnlyArgumentMustBeAContainerOrPanicWillOccur(
 			t.Error("Expected container to panic for a function without arguments")
 			return
 		} else {
-			if _, ok := recoveredErr.(ServiceFunctionFirstArgumentMustBeAContainerError); !ok {
+			if _, ok := recoveredErr.(dic.ServiceFunctionFirstArgumentMustBeAContainerError); !ok {
 				t.Error("Expected container to panic with an ServiceFunctionFirstArgumentMustBeAContainerError for function without arguments, got ", recoveredErr)
+				return
 			}
-			return
 		}
 
 		// ok, let's check "service.wrong_arg_type" now...
@@ -54,74 +55,78 @@ func TestServiceDefinedWithFunctionOnlyArgumentMustBeAContainerOrPanicWillOccur(
 			if nil == recoveredErr {
 				t.Error("Expected container to panic for a function which only argument is not a container")
 			} else {
-				if _, ok := recoveredErr.(ServiceFunctionFirstArgumentMustBeAContainerError); !ok {
+				typeError, ok := recoveredErr.(dic.ServiceFunctionFirstArgumentMustBeAContainerError)
+				if !ok {
 					t.Error("Expected container to panic with an ServiceFunctionFirstArgumentMustBeAContainerError for function which only argument is not a container", recoveredErr)
+				}
+				if typeError.FirstArgumentType != "string" {
+					t.Error("Expected container to panic with an ServiceFunctionFirstArgumentMustBeAContainerError with detected argument type 'string', got ", typeError.FirstArgumentType)
 				}
 			}
 		}()
-		c.get("service.wrong_arg_type")
+		c.Get("service.wrong_arg_type")
 	}()
 	// le't start by a "no arg" check...
-	c.get("service.no_arg")
+	c.Get("service.no_arg")
 }
 
 func TestServicesShouldBeTheSameInstance(t *testing.T) {
-	c := NewContainer()
+	c := dic.NewContainer()
 
 	i := 0
-	f := func(c *container) service { i++; return service{i} }
-	c.add(NewInjection("service", f))
+	f := func(c dic.Container) service { i++; return service{i} }
+	c.Add(dic.NewInjection("service", f))
 
-	injectedValue1 := c.get("service")
-	injectedValue2 := c.get("service")
+	injectedValue1 := c.Get("service")
+	injectedValue2 := c.Get("service")
 	if injectedValue1 != injectedValue2 {
 		t.Error("Expected consecutive calls to the same service to return the same value, got ", injectedValue1, injectedValue2)
 	}
 }
 
 func TestServicesReceiveAPointerToTheContainer(t *testing.T) {
-	c := NewContainer()
+	c := dic.NewContainer()
 
-	var receivedContainer *container
-	f := func(c *container) int { receivedContainer = c; return 33 }
-	c.add(NewInjection("service", f))
+	var receivedContainer dic.Container
+	f := func(c dic.Container) int { receivedContainer = c; return 33 }
+	c.Add(dic.NewInjection("service", f))
 
-	c.get("service")
+	c.Get("service")
 	if receivedContainer != c {
 		t.Error("Expected received container pointer to be the same than the one we created, got ", receivedContainer, c)
 	}
 }
 
 func TestHasInjection(t *testing.T) {
-	c := NewContainer()
+	c := dic.NewContainer()
 
-	c.add(NewInjection("param", "value"))
-	c.add(NewInjection("nil", nil))
-	f := func(c *container) service { return service{} }
-	c.add(NewInjection("service", f))
+	c.Add(dic.NewInjection("param", "value"))
+	c.Add(dic.NewInjection("nil", nil))
+	f := func(c dic.Container) service { return service{} }
+	c.Add(dic.NewInjection("service", f))
 
-	if !c.has("param") {
+	if !c.Has("param") {
 		t.Error("Expected container to contain \"param\"")
 	}
-	if !c.has("nil") {
+	if !c.Has("nil") {
 		t.Error("Expected container to contain \"nil\"")
 	}
-	if !c.has("service") {
+	if !c.Has("service") {
 		t.Error("Expected container to contain \"service\"")
 	}
-	if c.has("non_existent") {
+	if c.Has("non_existent") {
 		t.Error("Expected container to not contain \"non_existent\"")
 	}
 }
 
 func TestErrorIfGettingNonExistentInjectionId(t *testing.T) {
-	c := NewContainer()
+	c := dic.NewContainer()
 
-	_, err := c.getWithoutPanic("foo")
+	_, err := c.GetWithoutPanic("foo")
 	if nil == err {
 		t.Error("Expected container to return an error for a non-existent injection id when using 'getWithoutPanic()'")
 	}
-	if _, ok := err.(UnknownInjectionIdError); !ok {
+	if _, ok := err.(dic.UnknownInjectionIdError); !ok {
 		t.Error("Expected container to return an UnknownInjectionIdError for a non-existent injection id when using 'getWithoutPanic()', got ", err)
 	}
 
@@ -130,74 +135,72 @@ func TestErrorIfGettingNonExistentInjectionId(t *testing.T) {
 		if nil == recoveredErr {
 			t.Error("Expected container to panic for a non-existent injection id when using 'get()'")
 		} else {
-			if _, ok := recoveredErr.(UnknownInjectionIdError); !ok {
+			if _, ok := recoveredErr.(dic.UnknownInjectionIdError); !ok {
 				t.Error("Expected container to panic with an UnknownInjectionIdError for a non-existent injection id when using 'get()', got ", recoveredErr)
 			}
 		}
 	}()
-	c.get("foo")
+	c.Get("foo")
 }
 
 func TestInjectionDeletion(t *testing.T) {
-	c := NewContainer()
+	c := dic.NewContainer()
 
-	c.add(NewInjection("param", "value"))
+	c.Add(dic.NewInjection("param", "value"))
 
-	if !c.has("param") {
+	if !c.Has("param") {
 		t.Error("Expected container to contain \"param\"")
 	}
 
-	e := c.del("param")
+	e := c.Del("param")
 	if e != nil {
 		t.Error("Expected container to not return an error when deleting an existent injection id")
 	}
-	if c.has("param") {
+	if c.Has("param") {
 		t.Error("Expected container to not contain \"param\" any more")
 	}
 
-	e2 := c.del("foo")
+	e2 := c.Del("foo")
 	if e2 == nil {
 		t.Error("Expected container to return an error when deleting a non-existent injection id")
 	}
 
-	e3 := c.del("param")
+	e3 := c.Del("param")
 	if e3 == nil {
 		t.Error("Expected container to return an error when deleting a previously deleted injection id")
 	}
 }
 
 func TestFactoriesShouldReturnDifferentInstancesForEachRetrieval(t *testing.T) {
-	c := NewContainer()
+	c := dic.NewContainer()
 
 	i := 0
-	f := func(c *container) service { i++; return service{i} }
+	f := func(c dic.Container) service { i++; return service{i} }
 
-	injection := NewInjection("service", f)
-	injection.asFactory = true
-	c.add(injection)
+	c.Add(dic.NewInjection("service", f).MarkAsFactory())
 
-	injectedValue1 := c.get("service")
-	injectedValue2 := c.get("service")
+	injectedValue1 := c.Get("service")
+	injectedValue2 := c.Get("service")
 	if injectedValue1 == injectedValue2 {
 		t.Error("Expected consecutive calls to the same factory service to return new injections each time, got ", injectedValue1, injectedValue2)
 	}
 }
 
 func TestServicesDependencies(t *testing.T) {
-	c := NewContainer()
+	c := dic.NewContainer()
 
-	f := func(c *container) string {
-		recipient := c.get("recipient")
+	f := func(c dic.Container) string {
+		recipient := c.Get("recipient")
 		if recipientStr, ok := recipient.(string); ok {
 			return service{}.sayHi(recipientStr)
 		}
-		panic(UnknownInjectionIdError{injectionId: "recipient"})
+		panic(dic.UnknownInjectionIdError{InjectionId: "recipient"})
 	}
 
-	c.add(NewInjection("recipient", "world"))
-	c.add(NewInjection("helloService", f))
+	c.Add(dic.NewInjection("recipient", "world"))
+	c.Add(dic.NewInjection("helloService", f))
 
-	hello := c.get("helloService")
+	hello := c.Get("helloService")
 	if helloStr, ok := hello.(string); ok {
 		if helloStr != "hello world" {
 			t.Error("Expected 'helloService' result to be a 'hello world', got ", helloStr)
@@ -208,14 +211,12 @@ func TestServicesDependencies(t *testing.T) {
 }
 
 func TestProtectedFunction(t *testing.T) {
-	c := NewContainer()
+	c := dic.NewContainer()
 
 	f := func() service { return service{33} }
-	injection := NewInjection("service", f)
-	injection.protected = true
-	c.add(injection)
+	c.Add(dic.NewInjection("service", f).MarkAsProtected())
 
-	injectionResult := c.get("service")
+	injectionResult := c.Get("service")
 	if injectionResult, ok := injectionResult.(func() service); ok {
 		serviceValue := injectionResult()
 		if serviceValue.id != 33 {
@@ -227,12 +228,12 @@ func TestProtectedFunction(t *testing.T) {
 }
 
 func TestServiceExtension(t *testing.T) {
-	c := NewContainer()
+	c := dic.NewContainer()
 
-	f := func(c *container) service { return service{33} }
-	c.add(NewInjection("service", f))
+	f := func(c dic.Container) service { return service{33} }
+	c.Add(dic.NewInjection("service", f))
 
-	c.extend("service", func(container *container, decoratedServiceResult interface{}) service {
+	c.Extend("service", func(container dic.Container, decoratedServiceResult interface{}) service {
 		decoratedService, ok := decoratedServiceResult.(service)
 		if !ok {
 			t.Error("Expected service decoration first argument to be a service, got ", decoratedServiceResult)
@@ -241,7 +242,7 @@ func TestServiceExtension(t *testing.T) {
 		return service{decoratedService.id * 10}
 	})
 
-	injectedValue := c.get("service")
+	injectedValue := c.Get("service")
 	serviceValue, ok := injectedValue.(service)
 	if !ok {
 		t.Error("Expected service return value, got ", injectedValue)

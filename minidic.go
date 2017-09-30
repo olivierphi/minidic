@@ -3,11 +3,24 @@ package minidic
 import (
 	"fmt"
 	"reflect"
+	"regexp"
 )
 
-type container struct {
-	injections            map[string]injection
-	functionsResultsCache map[string]*interface{}
+// Public API
+
+type Injection interface {
+	InjectionId() string
+	MarkAsFactory() Injection
+	MarkAsProtected() Injection
+}
+
+type Container interface {
+	Add(newInjection Injection)
+	Get(injectionId string) interface{}
+	GetWithoutPanic(injectionId string) (interface{}, error)
+	Has(injectionId string) bool
+	Del(injectionId string) error
+	Extend(injectionId string, function interface{})
 }
 
 type injection struct {
@@ -17,37 +30,64 @@ type injection struct {
 	protected   bool
 }
 
-func NewContainer() *container {
+// Injection implementation
+
+func NewInjection(injectionId string, value interface{}) Injection {
+	return &injection{injectionId: injectionId, value: value, asFactory: false, protected: false}
+}
+
+func (i *injection) MarkAsFactory() Injection {
+	i.asFactory = true
+	return i
+}
+
+func (i *injection) MarkAsProtected() Injection {
+	i.protected = true
+	return i
+}
+
+func (i *injection) InjectionId() string {
+	return i.injectionId
+}
+
+type container struct {
+	injections            map[string]*injection
+	functionsResultsCache map[string]*interface{}
+}
+
+// Container implementation
+
+func NewContainer() Container {
 	c := new(container)
-	c.injections = make(map[string]injection)
+	c.injections = make(map[string]*injection)
 	c.functionsResultsCache = make(map[string]*interface{})
 	return c
 }
 
-func NewInjection(injectionId string, value interface{}) injection {
-	return injection{injectionId: injectionId, value: value, asFactory: false, protected: false}
+func (c *container) Add(newInjection Injection) {
+	if underlyingInjection, ok := newInjection.(*injection); ok {
+		c.injections[underlyingInjection.injectionId] = underlyingInjection
+	} else {
+		panic(fmt.Sprintf("'Container.Add()' argument must be an *newInjection, got %s", newInjection))
+	}
 }
 
-func (c *container) add(injection injection) {
-	c.injections[injection.injectionId] = injection
-}
-
-func (c *container) get(injectionId string) interface{} {
-	value, err := c.getWithoutPanic(injectionId)
+func (c *container) Get(injectionId string) interface{} {
+	value, err := c.GetWithoutPanic(injectionId)
 	if err != nil {
 		panic(err)
 	}
 	return value
 }
 
-func (c *container) getWithoutPanic(injectionId string) (interface{}, error) {
+func (c *container) GetWithoutPanic(injectionId string) (interface{}, error) {
 	if value, ok := c.functionsResultsCache[injectionId]; ok {
 		return *value, nil
 	}
 
 	injection, exists := c.injections[injectionId]
 	if !exists {
-		return nil, UnknownInjectionIdError{injectionId: injectionId}
+		return nil, UnknownInjectionIdError{InjectionId: injectionId}
 	}
 
 	value := injection.value
@@ -67,15 +107,15 @@ func (c *container) getWithoutPanic(injectionId string) (interface{}, error) {
 	return value, nil
 }
 
-func (c *container) has(injectionId string) bool {
+func (c *container) Has(injectionId string) bool {
 	_, ok := c.injections[injectionId]
 	return ok
 }
 
-func (c *container) del(injectionId string) error {
+func (c *container) Del(injectionId string) error {
 	_, ok := c.injections[injectionId]
 	if !ok {
-		return UnknownInjectionIdError{injectionId: injectionId}
+		return UnknownInjectionIdError{InjectionId: injectionId}
 	}
 
 	delete(c.injections, injectionId)
@@ -83,17 +123,17 @@ func (c *container) del(injectionId string) error {
 	return nil
 }
 
-func (c *container) extend(injectionId string, function interface{}) {
+func (c *container) Extend(injectionId string, function interface{}) {
 	extendedInjection, ok := c.injections[injectionId]
 	if !ok {
-		panic(UnknownInjectionIdError{injectionId: injectionId})
+		panic(UnknownInjectionIdError{InjectionId: injectionId})
 	}
 	extendedInjectionFunction := extendedInjection.value
 	if !isFunction(extendedInjectionFunction) {
-		panic(ExtendedServiceIsNotAFunctionError{extendedInjectionId: injectionId})
+		panic(ExtendedServiceIsNotAFunctionError{ExtendedInjectionId: injectionId})
 	}
 	if !isFunction(function) {
-		panic(ServiceExtensionIsNotAFunctionError{extendedInjectionId: injectionId})
+		panic(ServiceExtensionIsNotAFunctionError{ExtendedInjectionId: injectionId})
 	}
 
 	extendedInjection.value = func(c *container) interface{} {
@@ -110,53 +150,54 @@ func (c *container) extend(injectionId string, function interface{}) {
 	c.injections[injectionId] = extendedInjection
 }
 
+// Errors
+
 type UnknownInjectionIdError struct {
-	injectionId string
+	InjectionId string
 }
 
 func (e UnknownInjectionIdError) Error() string {
-	return fmt.Sprintf("Unknown injection id '%s'", e.injectionId)
+	return fmt.Sprintf("Unknown injection id '%s'", e.InjectionId)
 }
 
 type ExtendedServiceIsNotAFunctionError struct {
-	extendedInjectionId string
+	ExtendedInjectionId string
 }
 
 func (e ExtendedServiceIsNotAFunctionError) Error() string {
-	return fmt.Sprintf("Extended injection id '%s' is not mapped to a function", e.extendedInjectionId)
+	return fmt.Sprintf("Extended injection id '%s' is not mapped to a function", e.ExtendedInjectionId)
 }
 
 type ServiceExtensionIsNotAFunctionError struct {
-	extendedInjectionId string
+	ExtendedInjectionId string
 }
 
 func (e ServiceExtensionIsNotAFunctionError) Error() string {
-	return fmt.Sprintf("Service extending injection id '%s' is not a function", e.extendedInjectionId)
+	return fmt.Sprintf("Service extending injection id '%s' is not a function", e.ExtendedInjectionId)
 }
 
 type ServiceFunctionFirstArgumentMustBeAContainerError struct {
-	injectionId string
+	InjectionId       string
+	FirstArgumentType string
 }
 
 func (e ServiceFunctionFirstArgumentMustBeAContainerError) Error() string {
-	return fmt.Sprintf("Service '%s' function first argument must be a pointer to the container", e.injectionId)
+	return fmt.Sprintf("Service '%s' function first argument must be a pointer to the container, got ", e.InjectionId, e.FirstArgumentType)
 }
+
+// Internal utils
 
 func isFunction(value interface{}) bool {
 	return reflect.TypeOf(value).Kind() == reflect.Func
 }
 
-func triggerFunctionWithContainer(injectionId string, c *container, function interface{}, args ...interface{}) (interface{}, error) {
+func triggerFunctionWithContainer(injectionId string, c *container, function interface{}, args ...interface{}) (result interface{}, err error) {
 	functionReflection := reflect.ValueOf(function)
 	functionReflectionType := functionReflection.Type()
 
 	if functionReflectionType.NumIn() < 1 {
-		return nil, ServiceFunctionFirstArgumentMustBeAContainerError{injectionId: injectionId}
-	}
-
-	functionFirstArgument := functionReflectionType.In(0)
-	if functionFirstArgument.Kind() != reflect.Ptr || functionFirstArgument.Elem() == reflect.TypeOf(c) {
-		return nil, ServiceFunctionFirstArgumentMustBeAContainerError{injectionId: injectionId}
+		err = ServiceFunctionFirstArgumentMustBeAContainerError{injectionId, ""}
+		return
 	}
 
 	functionArgs := []reflect.Value{reflect.ValueOf(c)}
@@ -164,5 +205,21 @@ func triggerFunctionWithContainer(injectionId string, c *container, function int
 		functionArgs = append(functionArgs, reflect.ValueOf(args[i]))
 	}
 
-	return functionReflection.Call(functionArgs)[0].Interface(), nil
+	defer func() {
+		callErr := recover()
+		if callErr == nil {
+			return
+		}
+		if errString, ok := callErr.(string); ok {
+			re := regexp.MustCompile("reflect: Call using \\*minidic.container as type (\\w+)")
+			if match := re.FindStringSubmatch(errString); match != nil {
+				err = ServiceFunctionFirstArgumentMustBeAContainerError{injectionId, match[1]}
+				return
+			}
+		}
+		panic(callErr)
+	}()
+
+	result = functionReflection.Call(functionArgs)[0].Interface()
+	return
 }
