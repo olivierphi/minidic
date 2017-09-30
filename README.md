@@ -1,4 +1,4 @@
-# Minidic
+# ![Minidic logo](https://rougemine.com/public/minidic.png) Minidic
 
 [![Build Status](https://travis-ci.org/DrBenton/minidic.svg?branch=master)](https://travis-ci.org/DrBenton/minidic)
 
