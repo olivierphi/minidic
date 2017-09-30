@@ -28,6 +28,43 @@ func TestWithFunction(t *testing.T) {
 	}
 }
 
+func TestServiceDefinedWithFunctionOnlyArgumentMustBeAContainerOrPanicWillOccur(t *testing.T) {
+	c := NewContainer()
+
+	f1 := func() service { return service{} }
+	c.add(NewInjection("service.no_arg", f1))
+	f2 := func(test string) service { return service{} }
+	c.add(NewInjection("service.wrong_arg_type", f2))
+
+	defer func() {
+		recoveredErr := recover()
+		if nil == recoveredErr {
+			t.Error("Expected container to panic for a function without arguments")
+			return
+		} else {
+			if _, ok := recoveredErr.(ServiceFunctionFirstArgumentMustBeAContainerError); !ok {
+				t.Error("Expected container to panic with an ServiceFunctionFirstArgumentMustBeAContainerError for function without arguments, got ", recoveredErr)
+			}
+			return
+		}
+
+		// ok, let's check "service.wrong_arg_type" now...
+		defer func() {
+			recoveredErr := recover()
+			if nil == recoveredErr {
+				t.Error("Expected container to panic for a function which only argument is not a container")
+			} else {
+				if _, ok := recoveredErr.(ServiceFunctionFirstArgumentMustBeAContainerError); !ok {
+					t.Error("Expected container to panic with an ServiceFunctionFirstArgumentMustBeAContainerError for function which only argument is not a container", recoveredErr)
+				}
+			}
+		}()
+		c.get("service.wrong_arg_type")
+	}()
+	// le't start by a "no arg" check...
+	c.get("service.no_arg")
+}
+
 func TestServicesShouldBeTheSameInstance(t *testing.T) {
 	c := NewContainer()
 
@@ -154,7 +191,7 @@ func TestServicesDependencies(t *testing.T) {
 		if recipientStr, ok := recipient.(string); ok {
 			return service{}.sayHi(recipientStr)
 		}
-		panic(UnknownInjectionIdError{id: "recipient"})
+		panic(UnknownInjectionIdError{injectionId: "recipient"})
 	}
 
 	c.add(NewInjection("recipient", "world"))
@@ -182,10 +219,35 @@ func TestProtectedFunction(t *testing.T) {
 	if injectionResult, ok := injectionResult.(func() service); ok {
 		serviceValue := injectionResult()
 		if serviceValue.id != 33 {
-			t.Error("Expected protected service to have id '33', got ", serviceValue.id)
+			t.Error("Expected protected service to have injectionId '33', got ", serviceValue.id)
 		}
 	} else {
 		t.Error("Expected protected service to be returned as a function, got ", injectionResult)
+	}
+}
+
+func TestServiceExtension(t *testing.T) {
+	c := NewContainer()
+
+	f := func(c *container) service { return service{33} }
+	c.add(NewInjection("service", f))
+
+	c.extend("service", func(container *container, decoratedServiceResult interface{}) service {
+		decoratedService, ok := decoratedServiceResult.(service)
+		if !ok {
+			t.Error("Expected service decoration first argument to be a service, got ", decoratedServiceResult)
+			return service{}
+		}
+		return service{decoratedService.id * 10}
+	})
+
+	injectedValue := c.get("service")
+	serviceValue, ok := injectedValue.(service)
+	if !ok {
+		t.Error("Expected service return value, got ", injectedValue)
+	}
+	if serviceValue.id != 330 {
+		t.Error("Expected extended service to have injectionId '330', got ", serviceValue.id)
 	}
 }
 
