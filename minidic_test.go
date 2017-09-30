@@ -2,6 +2,7 @@ package minidic_test
 
 import (
 	dic "github.com/DrBenton/minidic"
+	"strconv"
 	"testing"
 )
 
@@ -200,6 +201,30 @@ func TestServicesDependencies(t *testing.T) {
 	hello := c.Get("helloService").(string)
 	if hello != "hello world" {
 		t.Error("Expected 'helloService' result to be a 'hello world', got ", hello)
+	}
+}
+
+func TestServicesDependenciesWithAutomaticallyInjectedDependencies(t *testing.T) {
+	c := dic.NewContainer()
+
+	c.Add(dic.NewInjection("service", func(c dic.Container) *service { return &service{36} }))
+	c.Add(dic.NewInjection("recipient", "world"))
+	c.Add(dic.NewInjection("nbExclamationMarks", 3))
+	c.Add(dic.NewInjection(
+		"helloService",
+		func(helloService *service, who string, nbExclamationMarks int) string {
+			recipient := who
+			for i := 0; i < nbExclamationMarks; i++ {
+				recipient += "!"
+			}
+			recipient += strconv.Itoa(helloService.id)
+			return helloService.sayHi(recipient)
+		},
+	).WithInjectedDependencies([]string{"service", "recipient", "nbExclamationMarks"}))
+
+	hello := c.Get("helloService").(string)
+	if hello != "hello world!!!36" {
+		t.Error("Expected 'helloService' result to be a 'hello world!!!36', got ", hello)
 	}
 }
 

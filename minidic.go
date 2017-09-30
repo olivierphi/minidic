@@ -10,6 +10,7 @@ import (
 
 type Injection interface {
 	InjectionId() string
+	WithInjectedDependencies(injectionsIds []string) Injection
 	MarkAsFactory() Injection
 	MarkAsProtected() Injection
 }
@@ -24,16 +25,17 @@ type Container interface {
 }
 
 type injection struct {
-	injectionId string
-	value       interface{}
-	asFactory   bool
-	protected   bool
+	injectionId     string
+	value           interface{}
+	dependenciesIds []string
+	asFactory       bool
+	protected       bool
 }
 
 // Injection implementation
 
 func NewInjection(injectionId string, value interface{}) Injection {
-	return &injection{injectionId: injectionId, value: value, asFactory: false, protected: false}
+	return &injection{injectionId: injectionId, value: value}
 }
 
 func (i *injection) MarkAsFactory() Injection {
@@ -43,6 +45,11 @@ func (i *injection) MarkAsFactory() Injection {
 
 func (i *injection) MarkAsProtected() Injection {
 	i.protected = true
+	return i
+}
+
+func (i *injection) WithInjectedDependencies(injectionsIds []string) Injection {
+	i.dependenciesIds = injectionsIds
 	return i
 }
 
@@ -68,7 +75,7 @@ func (c *container) Add(newInjection Injection) {
 	if underlyingInjection, ok := newInjection.(*injection); ok {
 		c.injections[underlyingInjection.injectionId] = underlyingInjection
 	} else {
-		panic(fmt.Sprintf("'Container.Add()' argument must be an *newInjection, got %s", newInjection))
+		panic(fmt.Sprintf("'Container.Add()' argument must be an *injection, got %s", newInjection))
 	}
 }
 
@@ -93,7 +100,13 @@ func (c *container) GetWithoutPanic(injectionId string) (interface{}, error) {
 	value := injection.value
 
 	if isFunction(value) && !injection.protected {
-		result, err := triggerFunctionWithContainer(injectionId, c, value)
+		var result interface{}
+		var err error
+		if injection.dependenciesIds != nil {
+			result, err = triggerFunctionWithInjectedIds(injectionId, c, value, injection.dependenciesIds)
+		} else {
+			result, err = triggerFunctionWithContainer(injectionId, c, value)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -219,6 +232,24 @@ func triggerFunctionWithContainer(injectionId string, c *container, function int
 		}
 		panic(callErr)
 	}()
+
+	result = functionReflection.Call(functionArgs)[0].Interface()
+	return
+}
+
+func triggerFunctionWithInjectedIds(injectionId string, c *container, function interface{}, dependenciesIds []string) (result interface{}, err error) {
+	functionReflection := reflect.ValueOf(function)
+
+	functionArgs := []reflect.Value{}
+	for i := 0; i < len(dependenciesIds); i++ {
+		dependencyId := dependenciesIds[i]
+		var resolvedDependency interface{}
+		resolvedDependency, err = c.GetWithoutPanic(dependencyId)
+		if err != nil {
+			return
+		}
+		functionArgs = append(functionArgs, reflect.ValueOf(resolvedDependency))
+	}
 
 	result = functionReflection.Call(functionArgs)[0].Interface()
 	return
